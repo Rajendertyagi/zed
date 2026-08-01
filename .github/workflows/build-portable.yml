@@ -4,15 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: 'Release channel baked into the build'
+        description: 'Release channel baked into the build (fixed to stable)'
         required: true
-        default: 'dev'
+        default: 'stable'
         type: choice
         options:
-          - dev
           - stable
-          - preview
-          - nightly
 
 env:
   ZED_WORKSPACE: ${{ github.workspace }}
@@ -54,17 +51,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ github.event.inputs.channel || 'dev' }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-stable
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-cargo-
 
       - name: Configure release env
+        id: configure_release
         shell: pwsh
         run: |
-          # Determine channel (input takes precedence, then file fallback)
+          # Channel is fixed to 'stable' by the dispatch input; still allow file fallback if needed
           $inputChannel = '${{ github.event.inputs.channel }}'
-          $channel = if ($inputChannel -and $inputChannel -ne '') { $inputChannel } else { 'dev' }
+          $channel = if ($inputChannel -and $inputChannel -ne '') { $inputChannel } else { 'stable' }
           if ((-not $channel -or $channel -eq '') -and (Test-Path crates/zed/RELEASE_CHANNEL)) {
             $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim()
           }
@@ -76,7 +74,7 @@ jobs:
             if ($toml -match 'version\s*=\s*"(.*?)"') { $version = $matches[1] }
           }
 
-          # Persist environment variables for subsequent steps
+          # Persist for subsequent steps
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -152,13 +150,13 @@ jobs:
           Write-Output "Created: $zipName"
           Get-Item "$workspace\\$zipName" | Select-Object Name, Length
 
-          # Persist the exact zip path for debugging if needed (runtime env)
+          # Persist the exact zip path for the upload step
           "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZIP_PATH=$workspace\\$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZedPortable-Windows-x64
-          path: ${{ github.workspace }}/*ZedPortable-windows-x64-*.zip
+          name: ZedPortable-Windows-x64-stable
+          path: ${{ env.ZIP_PATH }}
           retention-days: 7
