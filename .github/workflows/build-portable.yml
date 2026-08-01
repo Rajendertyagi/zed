@@ -65,7 +65,7 @@ jobs:
           # Determine channel (input takes precedence, then file fallback)
           $inputChannel = '${{ github.event.inputs.channel }}'
           $channel = if ($inputChannel -and $inputChannel -ne '') { $inputChannel } else { 'dev' }
-          if (-not $channel -and (Test-Path crates/zed/RELEASE_CHANNEL)) {
+          if ((-not $channel -or $channel -eq '') -and (Test-Path crates/zed/RELEASE_CHANNEL)) {
             $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim()
           }
 
@@ -116,7 +116,7 @@ jobs:
           $out = "conpty.nupkg"
           Invoke-WebRequest -Uri $conptyUrl -OutFile $out
 
-          # Optional checksum verification: if a file 'conpty.sha256' exists in repo, use it
+          # Optional checksum verification: if a file '.github/conpty.sha256' exists in repo, use it
           if (Test-Path ".github/conpty.sha256") {
             $expected = (Get-Content ".github/conpty.sha256" -Raw).Trim()
             $actual = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
@@ -152,9 +152,13 @@ jobs:
           Write-Output "Created: $zipName"
           Get-Item "$workspace\\$zipName" | Select-Object Name, Length
 
+          # Persist the exact zip path for the upload step
+          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ZIP_PATH=$workspace\\$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZedPortable-Windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}
-          path: ${{ env.ZED_WORKSPACE }}/ZedPortable-windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}.zip
-          retention-days: 7
+          name: ZedPortable-Windows-x64
+          path: ${{ env.ZIP_PATH }}
+          retention
