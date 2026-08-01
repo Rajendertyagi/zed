@@ -1,15 +1,7 @@
 name: Build Portable Zed (Windows x64)
 
 on:
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: 'Release channel baked into the build (fixed to stable)'
-        required: true
-        default: 'stable'
-        type: choice
-        options:
-          - stable
+  workflow_dispatch: {}
 
 env:
   ZED_WORKSPACE: ${{ github.workspace }}
@@ -21,36 +13,20 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      # Linux-only free-disk-space (will be skipped on windows-latest)
       - name: Free up disk space (Linux only)
         if: runner.os == 'Linux'
         uses: jlumbroso/free-disk-space@main
 
-      # Windows-specific cleanup to avoid calling Linux-only action on Windows
       - name: Free up disk space Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Output "Cleaning Windows temp folders and NuGet/Cargo caches to free disk space..."
-          # Remove temporary files
+          Write-Output "Cleaning Windows temp folders and common caches..."
           Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path "$env:TMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-          # Clear Chocolatey cache if present
           if (Get-Command choco -ErrorAction SilentlyContinue) {
             choco clean --yes
-          }
-
-          # Clear NuGet global packages cache
-          $nugetCache = Join-Path $env:USERPROFILE ".nuget\packages"
-          if (Test-Path $nugetCache) {
-            Get-ChildItem $nugetCache -Recurse -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-          # Optionally clear cargo registry cache (be careful: this will force re-downloads)
-          $cargoRegistry = Join-Path $env:USERPROFILE ".cargo\registry"
-          if (Test-Path $cargoRegistry) {
-            Get-ChildItem $cargoRegistry -Recurse -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           }
 
       - name: Checkout
@@ -89,25 +65,17 @@ jobs:
         id: configure_release
         shell: pwsh
         run: |
-          # Channel is fixed to 'stable' by the dispatch input; still allow file fallback if needed
-          $inputChannel = '${{ github.event.inputs.channel }}'
-          $channel = if ($inputChannel -and $inputChannel -ne '') { $inputChannel } else { 'stable' }
-          if ((-not $channel -or $channel -eq '') -and (Test-Path crates/zed/RELEASE_CHANNEL)) {
-            $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim()
-          }
-
-          # Determine version from Cargo.toml if present
+          # Channel fixed to stable
+          $channel = 'stable'
+          # Determine version from crates/zed/Cargo.toml if present
           $version = "0.0.0-dev"
           if (Test-Path crates/zed/Cargo.toml) {
             $toml = Get-Content crates/zed/Cargo.toml -Raw
             if ($toml -match 'version\s*=\s*"(.*?)"') { $version = $matches[1] }
           }
-
-          # Persist for subsequent steps
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
-
           Write-Output "RELEASE_VERSION=$version"
           Write-Output "RELEASE_CHANNEL=$channel"
 
@@ -124,11 +92,9 @@ jobs:
           $version = $env:RELEASE_VERSION
           $app = "ZedPortable"
 
-          # Clean and create structure
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $app
           New-Item -ItemType Directory -Force -Path "$app/bin", "$app/tools", "$app/x64" | Out-Null
 
-          # Ensure built artifacts exist
           if (-not (Test-Path "$rel/zed.exe")) { Write-Error "zed.exe not found at $rel"; exit 1 }
           if (-not (Test-Path "$rel/cli.exe")) { Write-Error "cli.exe not found at $rel"; exit 1 }
           if (-not (Test-Path "$rel/auto_update_helper.exe")) { Write-Error "auto_update_helper.exe not found at $rel"; exit 1 }
@@ -137,13 +103,11 @@ jobs:
           Copy-Item "$rel/cli.exe" "$app/bin/zed.exe"
           Copy-Item "$rel/auto_update_helper.exe" "$app/tools/auto_update_helper.exe"
 
-          # Download ConPTY package
           Write-Output "Downloading ConPTY terminal support..."
           $conptyUrl = "https://github.com/microsoft/terminal/releases/download/v1.23.13503.0/Microsoft.Windows.Console.ConPTY.1.23.251216003.nupkg"
           $out = "conpty.nupkg"
           Invoke-WebRequest -Uri $conptyUrl -OutFile $out
 
-          # Optional checksum verification: if a file '.github/conpty.sha256' exists in repo, use it
           if (Test-Path ".github/conpty.sha256") {
             $expected = (Get-Content ".github/conpty.sha256" -Raw).Trim()
             $actual = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
@@ -178,8 +142,6 @@ jobs:
           Compress-Archive -Path "ZedPortable" -DestinationPath "$workspace\\$zipName" -Force
           Write-Output "Created: $zipName"
           Get-Item "$workspace\\$zipName" | Select-Object Name, Length
-
-          # Persist the exact zip path for the upload step
           "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZIP_PATH=$workspace\\$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
 
