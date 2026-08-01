@@ -62,27 +62,27 @@ jobs:
       - name: Configure release env
         shell: pwsh
         run: |
-          # Get channel from input or default to dev
-          $channel = if ('${{ github.event.inputs.channel }}') { '${{ github.event.inputs.channel }}' } else { 'dev' }
-          if (-not $channel) { $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim() }
-          Write-Output "channel=$channel"
-          
-          # Get version from Cargo.toml or default to dev
+          # Determine channel (input takes precedence, then file fallback)
+          $inputChannel = '${{ github.event.inputs.channel }}'
+          $channel = if ($inputChannel -and $inputChannel -ne '') { $inputChannel } else { 'dev' }
+          if (-not $channel -and (Test-Path crates/zed/RELEASE_CHANNEL)) {
+            $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim()
+          }
+
+          # Determine version from Cargo.toml if present
           $version = "0.0.0-dev"
           if (Test-Path crates/zed/Cargo.toml) {
             $toml = Get-Content crates/zed/Cargo.toml -Raw
             if ($toml -match 'version\s*=\s*"(.*?)"') { $version = $matches[1] }
           }
-          
-          # Set environment variables
-          $env:RELEASE_VERSION = $version
-          $env:RELEASE_CHANNEL = $channel
-          $env:ZED_RELEASE_CHANNEL = $channel
-          
-          # Output for debugging
+
+          # Persist environment variables for subsequent steps
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+
           Write-Output "RELEASE_VERSION=$version"
           Write-Output "RELEASE_CHANNEL=$channel"
-          Write-Output "ZED_RELEASE_CHANNEL=$channel"
 
       - name: Build Zed, CLI and updater
         shell: pwsh
@@ -96,20 +96,48 @@ jobs:
           $channel = $env:RELEASE_CHANNEL
           $version = $env:RELEASE_VERSION
           $app = "ZedPortable"
+
+          # Clean and create structure
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $app
           New-Item -ItemType Directory -Force -Path "$app/bin", "$app/tools", "$app/x64" | Out-Null
+
+          # Ensure built artifacts exist
+          if (-not (Test-Path "$rel/zed.exe")) { Write-Error "zed.exe not found at $rel"; exit 1 }
+          if (-not (Test-Path "$rel/cli.exe")) { Write-Error "cli.exe not found at $rel"; exit 1 }
+          if (-not (Test-Path "$rel/auto_update_helper.exe")) { Write-Error "auto_update_helper.exe not found at $rel"; exit 1 }
 
           Copy-Item "$rel/zed.exe" "$app/Zed.exe"
           Copy-Item "$rel/cli.exe" "$app/bin/zed.exe"
           Copy-Item "$rel/auto_update_helper.exe" "$app/tools/auto_update_helper.exe"
 
+          # Download ConPTY package
           Write-Output "Downloading ConPTY terminal support..."
           $conptyUrl = "https://github.com/microsoft/terminal/releases/download/v1.23.13503.0/Microsoft.Windows.Console.ConPTY.1.23.251216003.nupkg"
           $out = "conpty.nupkg"
-          Invoke-WebRequest -Uri $conptyUrl -OutFile $out -UseBasicParsing
+          Invoke-WebRequest -Uri $conptyUrl -OutFile $out
+
+          # Optional checksum verification: if a file 'conpty.sha256' exists in repo, use it
+          if (Test-Path ".github/conpty.sha256") {
+            $expected = (Get-Content ".github/conpty.sha256" -Raw).Trim()
+            $actual = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+            $expectedNormalized = $expected -replace '\s+','' -replace '^[A-Fa-f0-9]+:','' -replace 'sha256:',''
+            $expectedNormalized = $expectedNormalized.ToLower()
+            if ($actual -ne $expectedNormalized) {
+              Write-Error "ConPTY checksum mismatch. Expected: $expectedNormalized Actual: $actual"
+              exit 1
+            } else {
+              Write-Output "ConPTY checksum verified."
+            }
+          } else {
+            Write-Output "No checksum file found at .github/conpty.sha256; skipping checksum verification."
+          }
 
           Copy-Item $out conpty.zip -Force
           Expand-Archive conpty.zip -DestinationPath conpty -Force
+
+          if (-not (Test-Path "conpty/build/native/runtimes/x64/OpenConsole.exe")) { Write-Error "OpenConsole.exe not found in package"; exit 1 }
+          if (-not (Test-Path "conpty/runtimes/win-x64/native/conpty.dll")) { Write-Error "conpty.dll not found in package"; exit 1 }
+
           Copy-Item "conpty/build/native/runtimes/x64/OpenConsole.exe" "$app/x64/OpenConsole.exe"
           Copy-Item "conpty/runtimes/win-x64/native/conpty.dll" "$app/conpty.dll"
 
@@ -121,11 +149,12 @@ jobs:
           $workspace = $env:ZED_WORKSPACE
           $zipName = "ZedPortable-windows-x64-$channel-$version.zip"
           Compress-Archive -Path "ZedPortable" -DestinationPath "$workspace\\$zipName" -Force
+          Write-Output "Created: $zipName"
           Get-Item "$workspace\\$zipName" | Select-Object Name, Length
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ZedPortable-Windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}
-          path: ${{ env.ZED_WORKSPACE }}/*ZedPortable-windows-x64-*.zip
+          path: ${{ env.ZED_WORKSPACE }}/ZedPortable-windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}.zip
           retention-days: 7
