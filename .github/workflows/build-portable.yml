@@ -61,21 +61,28 @@ jobs:
 
       - name: Configure release env
         shell: pwsh
-        env:
-          CHANNEL: ${{ github.event.inputs.channel }}
-          DEFAULT_CHANNEL: dev
         run: |
-          $channel = if ($env:CHANNEL) { $env:CHANNEL } else { $env:DEFAULT_CHANNEL }
+          # Get channel from input or default to dev
+          $channel = if ('${{ github.event.inputs.channel }}') { '${{ github.event.inputs.channel }}' } else { 'dev' }
           if (-not $channel) { $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim() }
           Write-Output "channel=$channel"
+          
+          # Get version from Cargo.toml or default to dev
           $version = "0.0.0-dev"
           if (Test-Path crates/zed/Cargo.toml) {
             $toml = Get-Content crates/zed/Cargo.toml -Raw
             if ($toml -match 'version\s*=\s*"(.*?)"') { $version = $matches[1] }
           }
-          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+          
+          # Set environment variables
+          $env:RELEASE_VERSION = $version
+          $env:RELEASE_CHANNEL = $channel
+          $env:ZED_RELEASE_CHANNEL = $channel
+          
+          # Output for debugging
+          Write-Output "RELEASE_VERSION=$version"
+          Write-Output "RELEASE_CHANNEL=$channel"
+          Write-Output "ZED_RELEASE_CHANNEL=$channel"
 
       - name: Build Zed, CLI and updater
         shell: pwsh
@@ -84,13 +91,10 @@ jobs:
 
       - name: Assemble portable folder
         shell: pwsh
-        env:
-          CHANNEL: ${{ env.RELEASE_CHANNEL }}
-          VERSION: ${{ env.RELEASE_VERSION }}
         run: |
           $rel = "target/x86_64-pc-windows-msvc/release"
-          $channel = $env:CHANNEL
-          $version = $env:VERSION
+          $channel = $env:RELEASE_CHANNEL
+          $version = $env:RELEASE_VERSION
           $app = "ZedPortable"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $app
           New-Item -ItemType Directory -Force -Path "$app/bin", "$app/tools", "$app/x64" | Out-Null
@@ -111,14 +115,10 @@ jobs:
 
       - name: Zip portable folder
         shell: pwsh
-        env:
-          CHANNEL: ${{ env.RELEASE_CHANNEL }}
-          VERSION: ${{ env.RELEASE_VERSION }}
-          WORKSPACE: ${{ env.ZED_WORKSPACE }}
         run: |
-          $channel = $env:CHANNEL
-          $version = $env:VERSION
-          $workspace = $env:WORKSPACE
+          $channel = $env:RELEASE_CHANNEL
+          $version = $env:RELEASE_VERSION
+          $workspace = $env:ZED_WORKSPACE
           $zipName = "ZedPortable-windows-x64-$channel-$version.zip"
           Compress-Archive -Path "ZedPortable" -DestinationPath "$workspace\\$zipName" -Force
           Get-Item "$workspace\\$zipName" | Select-Object Name, Length
