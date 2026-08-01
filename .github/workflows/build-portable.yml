@@ -41,6 +41,26 @@ jobs:
         with:
           clean: true
 
+      - name: Enable long paths and shorten Cargo/Rust dirs
+        shell: pwsh
+        run: |
+          Write-Output "Enabling Git longpaths and creating short Cargo/Rust dirs..."
+
+          # Enable long paths in Git for the runner
+          git config --global core.longpaths true
+          Write-Output "git core.longpaths set to true"
+
+          # Use short paths for Cargo and Rust toolchain to avoid long path issues
+          $shortCargo = "C:\cargo"
+          $shortRustup = "C:\rustup"
+          New-Item -ItemType Directory -Force -Path $shortCargo, $shortRustup | Out-Null
+
+          # Persist for subsequent steps
+          "CARGO_HOME=$shortCargo" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RUSTUP_HOME=$shortRustup" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Write-Output "Set CARGO_HOME and RUSTUP_HOME to short paths"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
