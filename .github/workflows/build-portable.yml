@@ -61,8 +61,11 @@ jobs:
 
       - name: Configure release env
         shell: pwsh
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+          DEFAULT_CHANNEL: dev
         run: |
-          $channel = '${{ github.event.inputs.channel }}'
+          $channel = if ($env:CHANNEL) { $env:CHANNEL } else { $env:DEFAULT_CHANNEL }
           if (-not $channel) { $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim() }
           Write-Output "channel=$channel"
           $version = "0.0.0-dev"
@@ -81,10 +84,13 @@ jobs:
 
       - name: Assemble portable folder
         shell: pwsh
+        env:
+          CHANNEL: ${{ env.RELEASE_CHANNEL }}
+          VERSION: ${{ env.RELEASE_VERSION }}
         run: |
           $rel = "target/x86_64-pc-windows-msvc/release"
-          $channel = $env:RELEASE_CHANNEL
-          $version = $env:RELEASE_VERSION
+          $channel = $env:CHANNEL
+          $version = $env:VERSION
           $app = "ZedPortable"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $app
           New-Item -ItemType Directory -Force -Path "$app/bin", "$app/tools", "$app/x64" | Out-Null
@@ -105,12 +111,17 @@ jobs:
 
       - name: Zip portable folder
         shell: pwsh
+        env:
+          CHANNEL: ${{ env.RELEASE_CHANNEL }}
+          VERSION: ${{ env.RELEASE_VERSION }}
+          WORKSPACE: ${{ env.ZED_WORKSPACE }}
         run: |
-          $channel = $env:RELEASE_CHANNEL
-          $version = $env:RELEASE_VERSION
+          $channel = $env:CHANNEL
+          $version = $env:VERSION
+          $workspace = $env:WORKSPACE
           $zipName = "ZedPortable-windows-x64-$channel-$version.zip"
-          Compress-Archive -Path "ZedPortable" -DestinationPath "$env:ZED_WORKSPACE\\$zipName" -Force
-          Get-Item "$env:ZED_WORKSPACE\\$zipName" | Select-Object Name, Length
+          Compress-Archive -Path "ZedPortable" -DestinationPath "$workspace\\$zipName" -Force
+          Get-Item "$workspace\\$zipName" | Select-Object Name, Length
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -118,3 +129,4 @@ jobs:
           name: ZedPortable-Windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}
           path: ${{ env.ZED_WORKSPACE }}/*ZedPortable-windows-x64-*.zip
           retention-days: 7
+          
