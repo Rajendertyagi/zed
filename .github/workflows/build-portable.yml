@@ -1,0 +1,120 @@
+name: Build Portable Zed (Windows x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Release channel baked into the build'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stable
+          - preview
+          - nightly
+
+env:
+  ZED_WORKSPACE: ${{ github.workspace }}
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ github.event.inputs.channel || 'dev' }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Configure release env
+        shell: pwsh
+        run: |
+          $channel = '${{ github.event.inputs.channel }}'
+          if (-not $channel) { $channel = (Get-Content crates/zed/RELEASE_CHANNEL).Trim() }
+          Write-Output "channel=$channel"
+          $version = "0.0.0-dev"
+          if (Test-Path crates/zed/Cargo.toml) {
+            $toml = Get-Content crates/zed/Cargo.toml -Raw
+            if ($toml -match 'version\s*=\s*"(.*?)"') { $version = $matches[1] }
+          }
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build Zed, CLI and updater
+        shell: pwsh
+        run: |
+          cargo build --release --package zed --package cli --package auto_update_helper --target x86_64-pc-windows-msvc
+
+      - name: Assemble portable folder
+        shell: pwsh
+        run: |
+          $rel = "target/x86_64-pc-windows-msvc/release"
+          $channel = $env:RELEASE_CHANNEL
+          $version = $env:RELEASE_VERSION
+          $app = "ZedPortable"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $app
+          New-Item -ItemType Directory -Force -Path "$app/bin", "$app/tools", "$app/x64" | Out-Null
+
+          Copy-Item "$rel/zed.exe" "$app/Zed.exe"
+          Copy-Item "$rel/cli.exe" "$app/bin/zed.exe"
+          Copy-Item "$rel/auto_update_helper.exe" "$app/tools/auto_update_helper.exe"
+
+          Write-Output "Downloading ConPTY terminal support..."
+          $conptyUrl = "https://github.com/microsoft/terminal/releases/download/v1.23.13503.0/Microsoft.Windows.Console.ConPTY.1.23.251216003.nupkg"
+          $out = "conpty.nupkg"
+          Invoke-WebRequest -Uri $conptyUrl -OutFile $out -UseBasicParsing
+
+          Copy-Item $out conpty.zip -Force
+          Expand-Archive conpty.zip -DestinationPath conpty -Force
+          Copy-Item "conpty/build/native/runtimes/x64/OpenConsole.exe" "$app/x64/OpenConsole.exe"
+          Copy-Item "conpty/runtimes/win-x64/native/conpty.dll" "$app/conpty.dll"
+
+      - name: Zip portable folder
+        shell: pwsh
+        run: |
+          $channel = $env:RELEASE_CHANNEL
+          $version = $env:RELEASE_VERSION
+          $zipName = "ZedPortable-windows-x64-$channel-$version.zip"
+          Compress-Archive -Path "ZedPortable" -DestinationPath "$env:ZED_WORKSPACE\\$zipName" -Force
+          Get-Item "$env:ZED_WORKSPACE\\$zipName" | Select-Object Name, Length
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZedPortable-Windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}
+          path: ${{ env.ZED_WORKSPACE }}/*ZedPortable-windows-x64-*.zip
+          retention-days: 7
