@@ -21,8 +21,37 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      - name: Free up disk space
+      # Linux-only free-disk-space (will be skipped on windows-latest)
+      - name: Free up disk space (Linux only)
+        if: runner.os == 'Linux'
         uses: jlumbroso/free-disk-space@main
+
+      # Windows-specific cleanup to avoid calling Linux-only action on Windows
+      - name: Free up disk space Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "Cleaning Windows temp folders and NuGet/Cargo caches to free disk space..."
+          # Remove temporary files
+          Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$env:TMP\*" -Recurse -Force -ErrorAction SilentlyContinue
+
+          # Clear Chocolatey cache if present
+          if (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco clean --yes
+          }
+
+          # Clear NuGet global packages cache
+          $nugetCache = Join-Path $env:USERPROFILE ".nuget\packages"
+          if (Test-Path $nugetCache) {
+            Get-ChildItem $nugetCache -Recurse -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # Optionally clear cargo registry cache (be careful: this will force re-downloads)
+          $cargoRegistry = Join-Path $env:USERPROFILE ".cargo\registry"
+          if (Test-Path $cargoRegistry) {
+            Get-ChildItem $cargoRegistry -Recurse -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Checkout
         uses: actions/checkout@v4
