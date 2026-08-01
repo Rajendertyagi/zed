@@ -25,8 +25,16 @@ jobs:
           Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path "$env:TMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
+          # Remove NuGet global packages cache (optional)
+          $nugetCache = Join-Path $env:USERPROFILE ".nuget\packages"
+          if (Test-Path $nugetCache) {
+            Write-Output "Clearing NuGet packages cache..."
+            Get-ChildItem $nugetCache -Recurse -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # Do not call non-portable Chocolatey commands; only detect presence
           if (Get-Command choco -ErrorAction SilentlyContinue) {
-            choco clean --yes
+            Write-Output "Chocolatey is installed; skipping Chocolatey-specific cleanup to avoid unsupported commands."
           }
 
       - name: Checkout
