@@ -152,7 +152,7 @@ jobs:
           Write-Output "Created: $zipName"
           Get-Item "$workspace\\$zipName" | Select-Object Name, Length
 
-          # Persist the exact zip path for the upload step
+          # Persist the exact zip path for debugging if needed (runtime env)
           "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZIP_PATH=$workspace\\$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
 
@@ -160,5 +160,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZedPortable-Windows-x64
-          path: ${{ env.ZIP_PATH }}
-          retention
+          path: ${{ github.workspace }}/*ZedPortable-windows-x64-*.zip
+          retention-days: 7
