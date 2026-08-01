@@ -32,7 +32,6 @@ jobs:
             Get-ChildItem $nugetCache -Recurse -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           }
 
-          # Do not call non-portable Chocolatey commands; only detect presence
           if (Get-Command choco -ErrorAction SilentlyContinue) {
             Write-Output "Chocolatey is installed; skipping Chocolatey-specific cleanup to avoid unsupported commands."
           }
@@ -55,6 +54,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           targets: x86_64-pc-windows-msvc
 
       - name: Cache Cargo registry and target
