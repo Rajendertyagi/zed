@@ -129,4 +129,3 @@ jobs:
           name: ZedPortable-Windows-x64-${{ env:RELEASE_CHANNEL }}-${{ env:RELEASE_VERSION }}
           path: ${{ env.ZED_WORKSPACE }}/*ZedPortable-windows-x64-*.zip
           retention-days: 7
-          
